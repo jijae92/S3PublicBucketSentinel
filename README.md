@@ -217,22 +217,23 @@ sam delete --stack-name s3pb-sentinel
 ## 아키텍처 개요
 
 flowchart LR
-  A[CloudTrail 관리 이벤트]
-  B[EventBridge 규칙]
-  C[Lambda Remediator]
-  D[S3 버킷]
-  E((SNS 토픽))
-  F[CloudWatch Logs 및 EMF]
-  G[스냅샷 버킷]
-  H[(Allowlist 저장소: DynamoDB / Tag / File)]
+  A[CloudTrail management events]
+  B[EventBridge rule]
+  C[Lambda remediator]
+  D[S3 bucket]
+  E[SNS topic]
+  F[CloudWatch Logs & EMF]
+  G[Snapshot bucket (optional)]
+  H[Allowlist store: DynamoDB · Tag · File]
 
   A --> B
   B --> C
-  C -->|Public Access Block 적용, ACL 정리, Policy 정리, SSE 강제| D
+  C -->|Enforce PAB, clean ACL & policy, force SSE| D
   C --> E
   C --> F
   C --> G
   C --> H
+
 
 
 ### 컴포넌트 & 데이터플로우
