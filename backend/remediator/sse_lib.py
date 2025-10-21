@@ -135,7 +135,7 @@ def ensure_encryption(
         LOGGER.info("Desired SSE already configured for %s", bucket.name)
         message = "SSE already compliant"
     else:
-        LOGGER.info("Dry run: would configure SSE %s", after)
+        LOGGER.info("Dry run: would configure SSE %s", desired)
     after_state = get_sse(bucket) if changed else before_state or desired
     return ActionOutcome(
         name="bucket-encryption",
