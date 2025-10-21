@@ -1,0 +1,54 @@
+name: CI
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pip-audit cfn-lint
+
+      - name: Run unit tests
+        run: |
+          pytest -q --maxfail=1 --cov=backend --cov-report=term-missing
+
+      - name: Generate pip audit report
+        run: |
+          pip-audit -r requirements.txt -f json -o pip-audit.json
+
+      - name: Upload pip audit report
+        uses: actions/upload-artifact@v4
+        with:
+          name: pip-audit
+          path: pip-audit.json
+
+      - name: Lint SAM template
+        run: |
+          cfn-lint infra/sam-template.yaml
+
+      - name: Validate SAM application
+        run: |
+          sam validate --template-file infra/sam-template.yaml
+
+# Optional deployment suggestion:
+# CodePipeline: Source → CodeBuild (run this workflow's steps) → Manual Approval → sam deploy

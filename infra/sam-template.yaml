@@ -1,0 +1,260 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >-
+  S3 Public Bucket Sentinel SAM template configuring real-time remediation and scheduled scanning.
+
+Globals:
+  Function:
+    Runtime: python3.11
+    Timeout: 120
+    MemorySize: 512
+    Tracing: Active
+
+Parameters:
+  SseMode:
+    Type: String
+    AllowedValues:
+      - SSE-S3
+      - SSE-KMS
+    Default: SSE-S3
+    Description: Server-side encryption mode applied during remediation.
+  KmsKeyArn:
+    Type: String
+    Default: ''
+    Description: Optional KMS key ARN used when SSE mode is SSE-KMS.
+  EnableObjectDataEvents:
+    Type: String
+    AllowedValues:
+      - 'true'
+      - 'false'
+    Default: 'false'
+    Description: Enable additional EventBridge rule for S3 object ACL data events.
+  NightlyScheduleExpression:
+    Type: String
+    Default: cron(0 15 * * ? *)
+    Description: Cron expression for the nightly scanner.
+  DryRun:
+    Type: String
+    Default: 'false'
+    AllowedValues:
+      - 'true'
+      - 'false'
+    Description: Toggle remediation dry-run mode.
+  EnforceAccountPba:
+    Type: String
+    Default: 'true'
+    AllowedValues:
+      - 'true'
+      - 'false'
+    Description: Enforce account-level Public Access Block when possible.
+  AllowlistSsmParam:
+    Type: String
+    Default: /security/sentinel/allowlist
+    Description: SSM parameter containing JSON allowlist payload.
+  AllowlistLocalJson:
+    Type: String
+    Default: config/sentinel-allow.json
+    Description: Local JSON file bundled with the function for allowlist overrides.
+
+Conditions:
+  UseKmsKey: !Not [!Equals [!Ref KmsKeyArn, '']]
+  CreateObjectDataRule: !Equals [!Ref EnableObjectDataEvents, 'true']
+
+Resources:
+  SnsTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      DisplayName: S3 Public Bucket Sentinel Alerts
+
+  RemediatorFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ../backend
+      Handler: remediator.handler.lambda_handler
+      Description: EventBridge-triggered Lambda function that remediates public S3 configurations.
+      Environment:
+        Variables:
+          DRY_RUN: !Ref DryRun
+          SSE_MODE: !Ref SseMode
+          KMS_KEY_ARN: !Ref KmsKeyArn
+          ENFORCE_ACCOUNT_PBA: !Ref EnforceAccountPba
+          ALLOWLIST_SSM_PARAM: !Ref AllowlistSsmParam
+          ALLOWLIST_LOCAL_JSON: !Ref AllowlistLocalJson
+          NOTIFY_TOPIC_ARN: !Ref SnsTopic
+      Events:
+        S3ApiActivity:
+          Type: EventBridgeRule
+          Properties:
+            Pattern:
+              source:
+                - aws.s3
+              detail-type:
+                - AWS API Call via CloudTrail
+              detail:
+                eventSource:
+                  - s3.amazonaws.com
+                eventName:
+                  - PutBucketAcl
+                  - PutObjectAcl
+                  - PutBucketPolicy
+                  - DeleteBucketPolicy
+                  - PutBucketPublicAccessBlock
+                  - DeletePublicAccessBlock
+                  - PutBucketEncryption
+                  - DeleteBucketEncryption
+                  - PutAccountPublicAccessBlock
+                  - DeleteAccountPublicAccessBlock
+      Policies:
+        - PolicyName: RemediatorAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: S3ReadWriteForRemediation
+                Effect: Allow
+                Action:
+                  - s3:ListAllMyBuckets
+                  - s3:GetBucketAcl
+                  - s3:PutBucketAcl
+                  - s3:GetBucketPolicy
+                  - s3:PutBucketPolicy
+                  - s3:DeleteBucketPolicy
+                  - s3:GetBucketPolicyStatus
+                  - s3:GetBucketPublicAccessBlock
+                  - s3:PutBucketPublicAccessBlock
+                  - s3:DeleteBucketPublicAccessBlock
+                  - s3:GetEncryptionConfiguration
+                  - s3:PutEncryptionConfiguration
+                  - s3:GetBucketTagging
+                  - s3:PutBucketTagging
+                Resource: '*'
+              - Sid: AllowSsmParameter
+                Effect: Allow
+                Action:
+                  - ssm:GetParameter
+                Resource: '*'
+              - Sid: AllowSnsPublish
+                Effect: Allow
+                Action:
+                  - sns:Publish
+                Resource: !Ref SnsTopic
+        - Fn::If:
+            - UseKmsKey
+            - 
+              PolicyName: RemediatorKmsAccess
+              PolicyDocument:
+                Version: '2012-10-17'
+                Statement:
+                  - Sid: AllowKmsKeyUsage
+                    Effect: Allow
+                    Action:
+                      - kms:Encrypt
+                      - kms:GenerateDataKey
+                      - kms:DescribeKey
+                    Resource: !Ref KmsKeyArn
+            - !Ref AWS::NoValue
+
+  ScannerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ../backend
+      Handler: scanner.job.handler
+      Description: Nightly scheduled Lambda that scans all buckets for public access drift.
+      Environment:
+        Variables:
+          DRY_RUN: !Ref DryRun
+          SSE_MODE: !Ref SseMode
+          KMS_KEY_ARN: !Ref KmsKeyArn
+          ENFORCE_ACCOUNT_PBA: !Ref EnforceAccountPba
+          ALLOWLIST_SSM_PARAM: !Ref AllowlistSsmParam
+          ALLOWLIST_LOCAL_JSON: !Ref AllowlistLocalJson
+          NOTIFY_TOPIC_ARN: !Ref SnsTopic
+      Events:
+        NightlySchedule:
+          Type: Schedule
+          Properties:
+            Name: NightlySentinelScan
+            Schedule: !Ref NightlyScheduleExpression
+      Policies:
+        - PolicyName: ScannerAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: S3ReadWriteForScanner
+                Effect: Allow
+                Action:
+                  - s3:ListAllMyBuckets
+                  - s3:GetBucketAcl
+                  - s3:PutBucketAcl
+                  - s3:GetBucketPolicy
+                  - s3:PutBucketPolicy
+                  - s3:DeleteBucketPolicy
+                  - s3:GetBucketPolicyStatus
+                  - s3:GetBucketPublicAccessBlock
+                  - s3:PutBucketPublicAccessBlock
+                  - s3:DeleteBucketPublicAccessBlock
+                  - s3:GetEncryptionConfiguration
+                  - s3:PutEncryptionConfiguration
+                  - s3:GetBucketTagging
+                  - s3:PutBucketTagging
+                Resource: '*'
+              - Sid: AllowSsmParameter
+                Effect: Allow
+                Action:
+                  - ssm:GetParameter
+                Resource: '*'
+        - Fn::If:
+            - UseKmsKey
+            - 
+              PolicyName: ScannerKmsAccess
+              PolicyDocument:
+                Version: '2012-10-17'
+                Statement:
+                  - Sid: AllowKmsKeyUsage
+                    Effect: Allow
+                    Action:
+                      - kms:Encrypt
+                      - kms:GenerateDataKey
+                      - kms:DescribeKey
+                    Resource: !Ref KmsKeyArn
+            - !Ref AWS::NoValue
+
+  S3ObjectAclDataRule:
+    Type: AWS::Events::Rule
+    Condition: CreateObjectDataRule
+    Properties:
+      Description: Optional data event rule that captures PutObjectAcl calls.
+      EventPattern:
+        source:
+          - aws.s3
+        detail-type:
+          - AWS API Call via CloudTrail
+        detail:
+          eventSource:
+            - s3.amazonaws.com
+          eventName:
+            - PutObjectAcl
+          eventCategory:
+            - Data
+      Targets:
+        - Arn: !GetAtt RemediatorFunction.Arn
+          Id: RemediatorFunctionTarget
+
+  PermissionForDataRule:
+    Type: AWS::Lambda::Permission
+    Condition: CreateObjectDataRule
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !GetAtt RemediatorFunction.Arn
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt S3ObjectAclDataRule.Arn
+
+Outputs:
+  SnsTopicArn:
+    Description: SNS topic ARN used for remediation notifications.
+    Value: !Ref SnsTopic
+  RemediatorFunctionArn:
+    Description: ARN of the immediate remediation Lambda function.
+    Value: !GetAtt RemediatorFunction.Arn
+  ScannerSchedule:
+    Description: Cron expression driving the nightly S3 scan.
+    Value: !Ref NightlyScheduleExpression

@@ -1,0 +1,10 @@
+boto3
+botocore
+moto[s3]>=5
+pydantic>=2
+python-dateutil
+aws-lambda-powertools==2.*
+pytest
+pytest-cov
+cfn-lint
+pip-audit
