@@ -1,5 +1,3 @@
----
-
 # S3 Public Bucket Sentinel — “오픈버킷 즉시 봉합”
 
 > **목적**
