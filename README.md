@@ -295,10 +295,13 @@ sam delete --stack-name s3pb-sentinel
 * 만료일 경과 시 자동으로 예외 무효화(로그 남김)
 
 ### DynamoDB 기반
-
 ```json
-// 파티션키: BucketName, 정렬키: Scope("ACL"|"Policy"|"All"), Until: "2025-12-31"
-{ "BucketName": "public-assets-prod", "Scope": "Policy", "Until": "2025-12-31", "Reason": "CDN 공개" }
+{
+  "BucketName": "public-assets-prod",
+  "Scope": "Policy",
+  "Until": "2025-12-31",
+  "Reason": "CDN 공개"
+}
 ```
 
 ### 파일 기반
