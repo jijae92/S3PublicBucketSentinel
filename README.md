@@ -216,25 +216,8 @@ sam delete --stack-name s3pb-sentinel
 
 ## 아키텍처 개요
 
----
-flowchart LR
-  A[CloudTrail management events]
-  B[EventBridge rule]
-  C[Lambda remediator]
-  D[S3 bucket]
-  E((SNS))
-  F[CloudWatch Logs + EMF]
-  G[Snapshot bucket]
-  H[(Allowlist store)]
+<img width="1214" height="550" alt="image" src="https://github.com/user-attachments/assets/67a62dd2-e123-49a5-89b2-cc5425e671ad" />
 
-  A --> B
-  B --> C
-  C --> D
-  C --> E
-  C --> F
-  C --> G
-  C --> H
----
 
 
 
